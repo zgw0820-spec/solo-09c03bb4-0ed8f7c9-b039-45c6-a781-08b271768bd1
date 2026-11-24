@@ -1,0 +1,79 @@
+{
+  "feasible": true,
+  "min_mounts": 2,
+  "mounts": [
+    {
+      "mount": 1,
+      "tape": "T1",
+      "read_from": 30.0,
+      "read_to": 30.0,
+      "reads": [
+        {
+          "shard_id": "a2",
+          "file_id": "file-A",
+          "tape": "T1",
+          "position": 30.0,
+          "size": 3.0,
+          "delivers_file": null
+        }
+      ],
+      "delivered_files": [],
+      "staging_before": 0.0,
+      "staging_peak": 3.0,
+      "staging_after": 3.0
+    },
+    {
+      "mount": 2,
+      "tape": "T2",
+      "read_from": 5.0,
+      "read_to": 20.0,
+      "reads": [
+        {
+          "shard_id": "a1",
+          "file_id": "file-A",
+          "tape": "T2",
+          "position": 5.0,
+          "size": 2.0,
+          "delivers_file": "file-A"
+        },
+        {
+          "shard_id": "b1",
+          "file_id": "file-B",
+          "tape": "T2",
+          "position": 9.0,
+          "size": 4.0,
+          "delivers_file": null
+        },
+        {
+          "shard_id": "b2",
+          "file_id": "file-B",
+          "tape": "T2",
+          "position": 20.0,
+          "size": 1.0,
+          "delivers_file": "file-B"
+        }
+      ],
+      "delivered_files": [
+        "file-A",
+        "file-B"
+      ],
+      "staging_before": 3.0,
+      "staging_peak": 5.0,
+      "staging_after": 0.0
+    }
+  ],
+  "files_restored": [
+    "file-A",
+    "file-B"
+  ],
+  "total_bytes_read": 10.0,
+  "missing_shards": [],
+  "capacity_issues": [],
+  "message": "最少需要 2 次装带",
+  "explanation": {
+    "lower_bound": 2,
+    "constructive_value": 2,
+    "lower_bound_achieved": true,
+    "detail": "按“每盘带一次能覆盖的分片”计算的下界为 2 次装带，本排程达到该下界，故为最少装带次数。"
+  }
+}
