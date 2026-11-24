@@ -1,12 +1,9 @@
-# 磁带跨带恢复排程 API
+# 磁带恢复排程与读片巡检 API
 
-用 FastAPI 实现的排程服务：给定中转盘空闲容量和磁带目录，求出把全部文件从磁带恢复到新存储所需的**最少装带次数**，并给出每次装带的带号、读取顺序和交付时点。
+用 FastAPI 实现的两个服务：
 
-- 最多 **6 盘带**、**12 个分片**、**48 份副本**
-- 每片只选一份副本；一次装带内可跳过分片，但磁头只能**向前**读
-- 回到带头重读 = 另一次装带
-- 中转盘必须先容纳所有暂存分片；文件读齐即校验、交付，并立刻释放它的空间
-- 无解时明确指出缺失副本的分片，以及必须同时暂存却超出中转盘容量的文件
+1. **`/schedule` 排程**：给定中转盘空闲容量和磁带目录，求出把全部文件从磁带恢复到新存储所需的**最少装带次数**，并给出每次装带的带号、读取顺序和交付时点。
+2. **`/audit` 巡检**：用同样的目录格式和两台带机编号开一轮读片校验；按回执号成批报送/撤回结果，列出能解释全部有效回执的**极小故障组合**，并给出供 `/schedule` 使用的目录（只滤掉每个组合都判坏的副本）。
 
 ## 启动
 
@@ -14,26 +11,107 @@
 docker compose up --build
 ```
 
-打开 <http://localhost:8000/docs>，展开 `POST /schedule` → **Try it out** → **Execute**，即可用内置样例试跑；也可以直接：
+打开 <http://localhost:8000/docs>，各端点都可用 **Try it out** 直接试跑。
 
 ```bash
+# 排程样例
 curl -s http://localhost:8000/example | \
   curl -s -X POST http://localhost:8000/schedule \
        -H 'Content-Type: application/json' --data-binary @-
 ```
 
-其它端点：
+巡检的完整流程（开轮 → 报送两批 → 查看结论 → 取排程目录 → 撤回误报）：
 
-| 方法 | 路径        | 说明                               |
-| ---- | ----------- | ---------------------------------- |
-| GET  | `/docs`     | Swagger UI（可交互试跑）           |
-| GET  | `/example`  | 返回可直接提交的样例请求           |
-| POST | `/schedule` | 计算最少装带次数的排程             |
-| GET  | `/healthz`  | 健康检查（容器 HEALTHCHECK 使用）  |
+```bash
+# 1) 开一轮巡检：/schedule 格式的目录 + 两台带机
+curl -s -X POST http://localhost:8000/audit/rounds \
+     -H 'Content-Type: application/json' \
+     --data-binary @examples/audit_round.json
+# 记下返回的 round_id，下称 $RID
 
-也可不用 Docker：`pip install -r requirements.txt && uvicorn app.main:app --port 8000`。
+# 2) 按回执号成批报送（同号原样重报不重复计数）
+curl -s -X POST http://localhost:8000/audit/rounds/$RID/batches \
+     -H 'Content-Type: application/json' \
+     --data-binary @examples/audit_batch_1.json
+curl -s -X POST http://localhost:8000/audit/rounds/$RID/batches \
+     -H 'Content-Type: application/json' \
+     --data-binary @examples/audit_batch_2.json
 
-## 请求格式
+# 3) 巡检结论：全部极小故障组合、确定/可能故障、停用或隔离建议
+curl -s http://localhost:8000/audit/rounds/$RID
+
+# 4) 供 /schedule 使用的目录：只滤掉每个组合都判坏的副本
+curl -s http://localhost:8000/audit/rounds/$RID/schedule-catalogue
+
+# 5) 撤回误报批次（该回执号此后不得复用）
+curl -s -X POST http://localhost:8000/audit/rounds/$RID/retract \
+     -H 'Content-Type: application/json' \
+     --data-binary @examples/audit_retract.json
+```
+
+也可以不用 Docker：`pip install -r requirements.txt && uvicorn app.main:app --port 8000`
+（巡检数据默认写到 `data/audit.db`，可用 `AUDIT_DB_PATH` 改）。
+
+巡检样例文件：`examples/audit_round.json`（开轮）、`audit_batch_1.json` /
+`audit_batch_2.json`（两批回执）、`audit_retract.json`（撤回）。上面的 5 步
+对应的实际响应见 `examples/audit_response.json`（`round_id` 以 `<ROUND_ID>`
+占位）；其中第 2 批证明 DRV-2 其它副本正常，因而唯一极小解释是副本 `a1-d2`
+损坏，目录滤掉它；撤回第 1 批后 `a1-d2` 恢复为可选、解释变为“无故障”。
+
+### 端点总览
+
+| 方法 | 路径                                   | 说明 |
+| ---- | -------------------------------------- | ---- |
+| GET  | `/docs`                                | Swagger UI（可交互试跑） |
+| GET  | `/example`                             | 可直接提交的排程样例请求 |
+| POST | `/schedule`                            | 计算最少装带次数的排程 |
+| POST | `/audit/rounds`                        | 开一轮巡检（目录 + 两台带机编号） |
+| GET  | `/audit/rounds/{round_id}`             | 巡检结论：全部极小故障组合与建议 |
+| GET  | `/audit/rounds/{round_id}/state`       | 轮次状态与修订号 |
+| GET  | `/audit/rounds/{round_id}/schedule-catalogue` | 供 `/schedule` 的过滤后目录 |
+| POST | `/audit/rounds/{round_id}/batches`     | 按回执号成批报送读片结果 |
+| POST | `/audit/rounds/{round_id}/retract`     | 按回执号整批撤回 |
+| GET  | `/audit/example`, `/audit/example/batch` | 巡检开轮 / 回执批次样例 |
+| GET  | `/healthz`                             | 健康检查（容器 HEALTHCHECK 使用） |
+
+## 巡检规则
+
+- **开轮**：`tape_units` 恰好两台带机；`catalogue` 沿用 `/schedule` 的
+  `files → shards → replicas` 结构，每个副本可直接带目录内唯一的 `replica_id`
+  （可省略，省略时按 `文件/分片@带机:位置` 自动生成），副本必须落在两台带机
+  之一。上限：12 文件、24 分片、48 副本。
+- **回执**：每条指明 `tape`（带机）、具体副本（`replica_id`，或退而用
+  `position` 指明带上的位置）、所属 `file_id`/`shard_id`，以及 `kind` 为
+  `pass` 或 `fail`。批次统一挂在 `receipt_id`（回执号）下。
+- **读片模型**：带机与副本都正常则通过，任一有故障则失败；持续故障合计
+  **最多 2 处**（带机 + 副本）。
+- **归因**：有效回执 = 通过的回执都避开故障点、失败的回执都至少命中一个故障点。
+  失败读片构成顶点覆盖问题，故障组合不超过 2 个，故可精确枚举出全部
+  **包含意义下的极小**组合（去掉任一故障就解释不通）。通过的回执会把对应的
+  带机和副本钉为健康，永不进入解释。
+- **结论**：`certain_faults` 是每个组合都包含的故障（可据此**停用带机**或
+  **隔离副本**）；`possible_faults` 只在部分组合中出现。`verdict` 与 `roadmap`
+  给出可执行建议：`retire`（停用/隔离）或 `verify`（换机/复读确认），并对每个
+  极小组合给出可读 `rationale`。`undecided_replicas` 列出只在部分组合下判坏、
+  因而仍保留的副本。
+- **重报/冲突/撤回**：同号同内容重报返回 `duplicate`（即便携带旧修订号也按幂等
+  处理），不重复计数；同号不同内容返回 409；撤回后整批失效且**该号不得复用**。
+  撤回导致某副本不再在所有组合中判坏时，它从过滤目录中恢复为可选
+  （`restored_replicas`）。
+- **整批拒收**：若加入新批次后有效回执无法由任何 ≤2 处故障解释，该批次整体
+  不写入，409 响应体的 `conflicts` 给出一个极小的冲突回执集；若批次引用了目录
+  中不存在/带机或位置不匹配的副本，同样整批不写入并返回 422 的结构化结果
+  （`status=rejected`，`conflicts` 列出每个问题）。
+- **供排程的目录**：只滤掉**每个极小组合都判坏**的副本（`excluded_replicas`），
+  原文件与分片全部保留（即使某分片因此没有副本，也保留分片让 `/schedule`
+  如实报缺失）；处于不确定状态的副本保留并列入 `undecided_replicas`。有效回执
+  矛盾时该端点返回 409，要求先撤回误报。
+- **并发与持久化**：SQLite + `BEGIN IMMEDIATE` 事务，报送/撤回在写锁内重新
+  读取有效回执再校验提交，已生效改动不会被并发更新覆盖；可选
+  `expected_revision` 提供乐观并发保护（不匹配返回 409）。数据库落在 Compose
+  具名卷 `audit-data` 上，重启后目录仍由同一批有效回执重新导出。
+
+## 排程请求 / 响应
 
 ```json
 {
@@ -61,70 +139,23 @@ curl -s http://localhost:8000/example | \
 - `replicas[].tape` / `position`：副本所在带号与位置；同一装带内的读取位置必须非降序
 - 分片的 `replicas` 为空数组表示该分片缺失
 
-样例文件见 `examples/sample_request.json` 与 `examples/sample_response.json`。
+样例见 `examples/sample_request.json` 与 `examples/sample_response.json`。响应中
+每次装带给出 `tape`、`reads`（升序）、`delivers_file`，以及
+`staging_before/peak/after`；无解时 `feasible=false` 并给出
+`missing_shards` / `capacity_issues`。
 
-## 响应格式
+## 排程算法
 
-```json
-{
-  "feasible": true,
-  "min_mounts": 2,
-  "mounts": [
-    {
-      "mount": 1,
-      "tape": "T1",
-      "read_from": 30,
-      "read_to": 30,
-      "reads": [
-        {
-          "shard_id": "a2",
-          "file_id": "file-A",
-          "tape": "T1",
-          "position": 30,
-          "size": 3,
-          "delivers_file": null
-        }
-      ],
-      "delivered_files": [],
-      "staging_before": 0,
-      "staging_peak": 3,
-      "staging_after": 3
-    }
-  ],
-  "files_restored": ["file-A", "file-B"],
-  "total_bytes_read": 10,
-  "missing_shards": [],
-  "capacity_issues": [],
-  "message": "最少需要 2 次装带",
-  "explanation": {
-    "lower_bound": 2,
-    "constructive_value": 2,
-    "lower_bound_achieved": true,
-    "detail": "..."
-  }
-}
-```
-
-每 `mounts` 项即一次装带：`tape` 带号，`reads` 按位置升序给出要读的分片，
-`delivers_file` 标记读到哪一片时哪个文件读齐并被交付；`staging_before/peak/after`
-给出该次装带前后及峰值的中转盘占用。无解时 `feasible=false`，`mounts` 为空，
-`missing_shards` 与 `capacity_issues` 给出原因。
-
-## 算法
-
-1. **静态判定**：任一分片无副本 → 缺失；任一文件分片总量 > 中转盘容量 → 无法校验交付。
-   这两种情况即为全部不可行原因（逐文件恢复即可构造出可行解，见下）。
-2. **状态**：只记录“已读分片集合”。已交付文件集合和当前占用都由该集合唯一确定，
-   因为每片只读一次。
-3. **搜索**：以“已读集合”为节点、一次装带为一条边做广度优先搜索；层数即装带数，
-   因此首次到达全集时的层数就是最少装带次数（精确最优）。
-4. **单次装带的可行读集**：对某盘带，枚举其上可读分片的所有子集。给定读集后，
-   占用只取决于集合本身，与读取顺序无关；对同盘重复副本取“不小于当前磁头位置的
-   最小位置”即可保留最大的后续选择空间，于是用一个按子集求最小磁头位置的动态规划
-   精确判定该读集能否在容量约束下一次装带完成。
-5. **下界解释**：按“每盘带一次能覆盖的分片”计算集合覆盖下界；若构造值等于下界则
-   直接证明最优，否则在 `explanation` 中说明是容量约束导致需要重复装带，并由 BFS
-   穷尽更少次数证明最优。
+1. **静态判定**：任一分片无副本 → 缺失；任一文件分片总量 > 中转盘容量 → 无法
+   校验交付。这两种情况即全部不可行原因。
+2. **状态**：只记录“已读分片集合”；已交付文件集合和当前占用都由该集合唯一确定。
+3. **搜索**：以“已读集合”为节点、一次装带为一条边做广度优先搜索；首次到达
+   全集时的层数就是最少装带次数（精确最优）。
+4. **单次装带的可行读集**：对某盘带枚举可读分片的子集，用“按子集求最小磁头
+   位置”的动态规划精确判定能否一次装带完成（容量峰值在交付前计入）。
+5. **下界解释**：按“每盘带一次能覆盖的分片”算集合覆盖下界；达到下界即证明
+   最优，否则在 `explanation` 中说明容量约束导致重复装带，并由 BFS 穷尽更少
+   次数证明最优。
 
 ## 测试
 
@@ -132,23 +163,27 @@ curl -s http://localhost:8000/example | \
 python -m pytest -q
 ```
 
-测试包含两类独立校验：
-
-- `replay()`：不依赖求解器内部记账，按请求逐条重放排程，检查每片只读一次、
-  所选副本确实存在、位置非降序、容量峰值不超限、文件读齐即时交付；
-- `brute_force_min()`：对小型实例穷举所有装带序列，与求解器的最少装带数对比
-  （含大量随机实例），验证最优性。
+- `tests/test_solver.py`：`replay()` 独立重放排程、`brute_force_min()` 穷举对拍
+  最少装带数（含随机实例）。
+- `tests/test_audit.py`：独立暴力枚举所有 ≤2 处故障集合，与 API 的极小组合对拍；
+  覆盖重报不重复计数、同号异内容拒收、解释不通整批拒收、撤回后号码不复用与
+  副本恢复可选、目录只滤确定损坏副本、并发不丢更新、重开连接后目录一致。
 
 ## 文件结构
 
 ```
 app/
-  main.py       FastAPI 应用与路由
-  models.py     Pydantic 请求/响应模型与上限校验
-  solver.py     最少装带次数求解器
+  main.py           FastAPI 应用、排程路由与样例
+  models.py         排程请求/响应模型与上限校验
+  solver.py         最少装带次数求解器
+  audit_models.py   巡检请求/响应模型（含 /schedule 格式目录）
+  audit_logic.py    回执归因：极小故障组合、冲突集、确定性判定
+  audit_store.py    SQLite 持久化、批次/撤回事务、目录过滤
+  audit_api.py      巡检 HTTP 路由
 tests/
-  test_solver.py  求解器、重放校验、暴力对拍
-  test_api.py     HTTP 接口测试
-examples/         样例请求与响应
+  test_solver.py    求解器、重放校验、暴力对拍
+  test_api.py       排程 HTTP 接口测试
+  test_audit.py     巡检归因对拍、冲突、撤回、并发、持久化
+examples/           排程与巡检的样例请求/响应
 Dockerfile / docker-compose.yml
 ```

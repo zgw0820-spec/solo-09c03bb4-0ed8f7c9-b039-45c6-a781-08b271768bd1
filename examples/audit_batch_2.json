@@ -1,0 +1,33 @@
+{
+  "receipt_id": "R-2024-002",
+  "receipts": [
+    {
+      "kind": "pass",
+      "tape": "DRV-1",
+      "file_id": "file-A",
+      "shard_id": "a2",
+      "replica_id": "a2-d1"
+    },
+    {
+      "kind": "pass",
+      "tape": "DRV-2",
+      "file_id": "file-B",
+      "shard_id": "b1",
+      "replica_id": "b1-d2"
+    },
+    {
+      "kind": "pass",
+      "tape": "DRV-1",
+      "file_id": "file-B",
+      "shard_id": "b2",
+      "replica_id": "b2-d1"
+    },
+    {
+      "kind": "pass",
+      "tape": "DRV-2",
+      "file_id": "file-B",
+      "shard_id": "b2",
+      "replica_id": "b2-d2"
+    }
+  ]
+}

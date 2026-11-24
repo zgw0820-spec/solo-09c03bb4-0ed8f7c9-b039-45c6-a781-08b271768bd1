@@ -1,0 +1,50 @@
+{
+  "tape_units": ["DRV-1", "DRV-2"],
+  "catalogue": {
+    "staging_capacity": 10,
+    "files": [
+      {
+        "id": "file-A",
+        "shards": [
+          {
+            "id": "a1",
+            "size": 2,
+            "replicas": [
+              {"replica_id": "a1-d1", "tape": "DRV-1", "position": 10},
+              {"replica_id": "a1-d2", "tape": "DRV-2", "position": 10}
+            ]
+          },
+          {
+            "id": "a2",
+            "size": 3,
+            "replicas": [
+              {"replica_id": "a2-d1", "tape": "DRV-1", "position": 30},
+              {"replica_id": "a2-d2", "tape": "DRV-2", "position": 30}
+            ]
+          }
+        ]
+      },
+      {
+        "id": "file-B",
+        "shards": [
+          {
+            "id": "b1",
+            "size": 4,
+            "replicas": [
+              {"replica_id": "b1-d1", "tape": "DRV-1", "position": 20},
+              {"replica_id": "b1-d2", "tape": "DRV-2", "position": 20}
+            ]
+          },
+          {
+            "id": "b2",
+            "size": 1,
+            "replicas": [
+              {"replica_id": "b2-d1", "tape": "DRV-1", "position": 40},
+              {"replica_id": "b2-d2", "tape": "DRV-2", "position": 40}
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
